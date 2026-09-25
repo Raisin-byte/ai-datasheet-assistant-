@@ -1,66 +1,84 @@
 import os
+import streamlit as st
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-
-# 1. Автоматически подтягиваем ваш рабочий ключ из файла .env
-load_dotenv()
-
-# 2. Инициализируем модель ChatGPT (активируем 10 долларов)
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-
-# 3. Задаем роль для нашего ИИ-помощника
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "Ты — опытный инженер-электронщик, senior-разработчик встроенных систем (Embedded) "
-        "и по совместительству мудрый, поддерживающий учитель. Твоя цель — помогать "
-        "пользователю разбираться в сложных даташитах, архитектуре чипов и коде.\n\n"
-        "Правила общения:\n"
-        "1. Отвечай строго профессионально, глубоко и технически грамотно.\n"
-        "2. Разбавляй ответы тонким, добрым инженерным юмором (без токсичности и жесткого сарказма).\n"
-        "3. Объясняй сложные концепции простыми словами, как лучший университетский ментор.\n"
-        "4. Общайся на русском и английском языках."),
-    ("user", "{input}")
-])
-# Дополнительные импорты для работы с PDF и ChromaDB 
-from langchain_community.document_loaders import PyPDFDirectoryLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 
-# Проверяем, что папка data существует
-if not os.path.exists("data"):
-    os.makedirs("data")
+# Настройка страницы Streamlit (красивый интерфейс ChatGPT)
+st.set_page_config(page_title="AI Engineering Assistant", page_icon="🛠️", layout="wide")
+st.title("🛠️ AI Assistant for Datasheets & Manuals")
+st.caption("Твой мудрый инженерный ментор с тонким юмором")
 
-print("1. Загрузка PDF-файлов из папки data/...")
-loader = PyPDFDirectoryLoader("data")
-docs = loader.load()
+# Прописываем твой рабочий ключ OpenAI намертво
+API_KEY = "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" # ПОДСТАВЬ СЮДА СВОЙ ПОЛНЫЙ КЛЮЧ OpenAI!
 
-if not docs:
-    print("❌ Папка data/ пуста! Закинь туда хотя бы один PDF-даташит.")
-else:
-    print(f"✅ Успешно загружено страниц из PDF: {len(docs)}")
+BASE_DIR = os.getcwd()
+pdf_path = os.path.join(BASE_DIR, "data", "lecture 3.pdf") 
 
-# Инициализируем переводчик текста в векторы
-embeddings = OpenAIEmbeddings()
+@st.cache_resource
+def init_rag():
+    if not os.path.exists(pdf_path):
+        return None
+    try:
+        loader = PyPDFLoader(pdf_path)
+        docs = loader.load()
+        if not docs:
+            return None
+        embeddings = OpenAIEmbeddings(api_key= API_KEY)
+        vector_store = Chroma.from_documents(docs, embeddings, persist_directory=os.path.join(BASE_DIR, "vector_db"))
+        return vector_store.as_retriever(search_kwargs={"k": 3})
+    except Exception as e:
+        return None
 
-print("2. Индексация документов в базу данных Chroma...")
-vector_store = Chroma.from_documents(docs, embeddings, persist_directory="vector_db") if docs else None
-retriever = vector_store.as_retriever(search_kwargs={"k": 3}) if vector_store else None
+retriever = init_rag()
 
-# Собираем конвейер
+# Красивая боковая панель статуса
+with st.sidebar:
+    st.header("📦 Статус документов")
+    if retriever:
+        st.success("Лекция 'lecture 3.pdf' успешно найдена и прочитана!")
+    else:
+        st.error("Файл 'lecture 3.pdf' не найден!")
+        st.info(f"Убедись, что файл лежит по пути: {pdf_path}")
+
+# Инициализация ИИ
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5, api_key=API_KEY)
+prompt = ChatPromptTemplate.from_messages([
+    ("system", (
+        "Ты — опытный инженер-электронщик, senior-разработчик встроенных систем (Embedded) "
+        "и мудрый учитель с тонким юмором. Твоя цель — помогать разбираться в даташитах.\n\n"
+        "Используй следующий контекст из технической документации, чтобы ответить на вопрос пользователя:\n{context}"
+    )),
+    ("user", "{input}")
+])
 chain = prompt | llm | StrOutputParser()
 
-# Запуск диалога в консоли
-print("\n🚀 Ассистент готов к работе!")
-while True:
-    user_query = input("\nАрсений (или 'выход'): ")
-    if user_query.lower() in ['выход', 'quit', 'exit']:
-        break
-        
+# Сохранение истории чата в стиле Streamlit
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Поле ввода, как в настоящем ChatGPT
+if user_query := st.chat_input("Задай вопрос по даташиту..."):
+    with st.chat_message("user"):
+        st.markdown(user_query)
+    st.session_state.messages.append({"role": "user", "content": user_query})
+
     context_text = ""
     if retriever:
         retrieved_docs = retriever.invoke(user_query)
         context_text = "\n\n".join([f"[Стр. {d.metadata.get('page', 'Неизвестно')}]: {d.page_content}" for d in retrieved_docs])
-    
-    response = chain.invoke({"context": context_text, "input": user_query})
-    print(f"\nИИ-Инженер:\n{response}")
+
+    with st.chat_message("assistant"):
+        response_placeholder = st.empty()
+        response = chain.invoke({"context": context_text, "input": user_query})
+        response_placeholder.markdown(response)
+        
+    st.session_state.messages.append({"role": "assistant", "content": response})
