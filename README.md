@@ -41,3 +41,4 @@ An advanced RAG (Retrieval-Augmented Generation) system built with Streamlit and
 GitHub (https://github.com/)
 GitHub · Change is constant. GitHub keeps you ahead.
 Join the world's most widely adopted, AI-powered developer platform where millions of developers, businesses, and the largest open source community build software that advances humanity.
+![AI Assistant Demo](screenshot.png)
